@@ -18,17 +18,17 @@ __global__ void vecInitKernel(float *A, int n, float value)
         A[i] = value;
 }
 
-__global__ void saxpy_monolithicc(int n, float a, float *x, float *y)
+__global__ void vecAddMonolithic(float a, float *x, float *y, int n)
 {
-    for (int i = blockIdx.x * blockDim.x + threadIdx.x; 
-         i < n; 
-         i += blockDim.x * gridDim.x) 
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x;
+         i < n;
+         i += blockDim.x * gridDim.x)
       {
-          y[i] = a * x[i] + y[i];
+        y[i] = a * x[i] + y[i];
       }
 }
 
-float *vecAdd(float *A, float *B, int n)
+float *vecAddStandard(float *d_A, float *d_B, int n)
 {
     //defining the sizes of the memory objects to be copied to/from the device (in this case all three)
     int size = pow(2, 24);
@@ -37,24 +37,22 @@ float *vecAdd(float *A, float *B, int n)
 
     // Allocate device memory for vectors A & B and the result vector C
     //1) declaring vectors
-    float *d_A;
-    float *d_B;
     float *d_C;
 
-    //2) allocating memory for vectors
+    //2) allocating memory for vectors (unified)
     cudaMalloc(&d_A, size);
     cudaMalloc(&d_B, size);
     cudaMalloc((void**)&d_C, size);
 
-    // Transfer the host input vectors A & B to device vectors d_A is used 
-    // at the start, later d_C is used as an output as well
-    //cudaMemcpy(d_A, A, size, cudaMemcpyHostToDevice);
-    //cudaMemcpy(d_B, B, size, cudaMemcpyHostToDevice);
-
-    // Launch the VecAdd CUDA Kernel with one thread for each element
+    //initializing the vectors with initKernel and with correct values
     vecInitKernel <<<numBlocks, blockSize >>> (d_A, n, 1.0f);
     vecInitKernel <<<numBlocks, blockSize >>> (d_B, n, 2.0f);
+    vecInitKernel <<<numBlocks, blockSize >>> (d_C, n, 0.0f);
+
+    // Launch the VecAdd CUDA Kernel with one thread for each element
     vecAddKernel <<<numBlocks, blockSize>>> (d_A, d_B, d_C, n);
+    vecAddMonolithic <<<numBlocks, blockSize >>> (1.0f, d_B, d_C, n);
+
     // Check for errors launching the kernel
     cudaError_t cudaerr = cudaGetLastError();
     if (cudaerr != cudaSuccess)
@@ -70,11 +68,12 @@ float *vecAdd(float *A, float *B, int n)
     float *C = (float*) malloc(size);
     cudaerr = cudaMemcpy(C, d_C, size, cudaMemcpyDeviceToHost);
 
-  float maxError = 0.0f;
-  for (int i = 0; i < size; i++)
-    if (C[i] != 3.0f) {
-        std::cout << "Max error: " << maxError << std::endl;
-    }
+    //error displaying for vector addition
+//   float maxError = 0.0f;
+//   for (int i = 0; i < size; i++)
+//     if (C[i] != 3.0f) {
+//         std::cout << "Max error: " << maxError << std::endl;
+//     }
 
     if (cudaerr != cudaSuccess)
         fprintf(stderr, "Failed to copy result vector from device to host (error code %s)!\n", cudaGetErrorString(cudaerr));
@@ -87,36 +86,34 @@ float *vecAdd(float *A, float *B, int n)
     return C;
 }
 
-float *vecAdd2(float *A, float *B, int n)
+float *vecAddUnified(float *d_A, float *d_B, int n)
 {
     //defining the sizes of the memory objects to be copied to/from the device (in this case all three)
     int size = pow(2, 24);
     int blockSize = 32;
     int numBlocks = ceil(n/blockSize);
 
-    // Allocate device memory for vectors A & B and the result vector C
+    // Allocate device memory for result vector C
     //1) declaring vectors
-    float *d_A;
-    float *d_B;
     float *d_C;
 
      // vector in host memory (declaration + allocation on host memory).
     float *C = (float*) malloc(size);
 
-    //2) allocating memory for vectors
-    cudaMalloc(&d_A, size);
-    cudaMalloc(&d_B, size);
-    cudaMalloc((void**)&d_C, size);
+    //2) allocating memory for vectors (unified)
+    cudaMallocManaged(&d_A, size);
+    cudaMallocManaged(&d_B, size);
+    cudaMallocManaged((void**)&d_C, size);
 
-    // Transfer the host input vectors A & B to device vectors d_A is used 
-    // at the start, later d_C is used as an output as well
-    //cudaMemcpy(d_A, A, size, cudaMemcpyHostToDevice);
-    //cudaMemcpy(d_B, B, size, cudaMemcpyHostToDevice);
-
-    // Launch the VecAdd CUDA Kernel with one thread for each element
+    //initializing the vectors with initKernel
     vecInitKernel <<<numBlocks, blockSize >>> (d_A, n, 1.0f);
     vecInitKernel <<<numBlocks, blockSize >>> (d_B, n, 2.0f);
-    vecAddKernel <<<numBlocks, blockSize>>> (d_A, d_B, d_C, n);
+    vecInitKernel <<<numBlocks, blockSize >>> (d_C, n, 0.0f);
+
+    // Launch the VecAdd CUDA Kernel with one thread for each element
+    vecAddKernel <<<numBlocks, blockSize >>> (d_A, d_B, d_C, n);
+    vecAddMonolithic <<<numBlocks, blockSize >>> (1.0f, d_B, d_C, n);
+
     // Check for errors launching the kernel
     cudaError_t cudaerr = cudaGetLastError();
     if (cudaerr != cudaSuccess)
@@ -130,11 +127,12 @@ float *vecAdd2(float *A, float *B, int n)
     // Copy the device result vector in device memory to the host result
     cudaerr = cudaMemcpy(C, d_C, size, cudaMemcpyDeviceToHost);
 
-  float maxError = 0.0f;
-  for (int i = 0; i < size; i++)
-    if (C[i] != 3.0f) {
-        std::cout << "Max error: " << maxError << std::endl;
-    }
+    //error display for vector addition
+//   float maxError = 0.0f;
+//   for (int i = 0; i < size; i++)
+//     if (C[i] != 3.0f) {
+//         std::cout << "Max error: " << maxError << std::endl;
+//     }
 
     if (cudaerr != cudaSuccess)
         fprintf(stderr, "Failed to copy result vector from device to host (error code %s)!\n", cudaGetErrorString(cudaerr));
@@ -152,27 +150,22 @@ int main(int ac, char **av)
     int N = 1<<20;
     float *x, *y, *c;
 
-    if (ac != 2) {
-        std::cout << "non" << std::endl;
-        return (84);
-    }
-
     if (strcmp(av[1], "standard") == 0) {
     //for standard memory
 		cudaMalloc(&x, N*sizeof(float));
-        cudaMalloc(&x, N*sizeof(float));
+        cudaMalloc(&y, N*sizeof(float));
+        cudaMalloc(&c, N*sizeof(float));
+        c = vecAddStandard(x, y, N);
     } else if(strcmp(av[1], "unified") == 0) {
-    //only for unified memory
+    //for unified memory<
 		cudaMallocManaged(&x, N*sizeof(float));
         cudaMallocManaged(&y, N*sizeof(float));
+        cudaMallocManaged(&c, N*sizeof(float));
+        c = vecAddUnified(x, y, N);
     } else {
-        std::cout << "non" << std::endl;
+        std::cout << "wrong arguments" << std::endl;
         return 84;
     }
-
-    c = vecAdd(x, y, N);
-
-    std::cout << c << std::endl;
     
     return 0;
 }
