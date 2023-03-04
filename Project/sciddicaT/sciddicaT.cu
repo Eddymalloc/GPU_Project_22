@@ -28,22 +28,6 @@
 #define BUF_SET(M, rows, columns, n, i, j, value) ( (M)[( ((n)*(rows)*(columns)) + ((i)*(columns)) + (j) )] = (value) )
 #define BUF_GET(M, rows, columns, n, i, j) ( M[( ((n)*(rows)*(columns)) + ((i)*(columns)) + (j) )] )
 
-#define DeviceErrorhdl(ans)               \
-  {                                       \
-    gpuAssert((ans), __FILE__, __LINE__); \
-  }
-inline void gpuAssert(cudaError_t code, const char *file, int line,
-                      bool abort = true)
-{
-  if (code != cudaSuccess)
-  {
-    fprintf(stderr, "GPUassert: %s %s %d\n", cudaGetErrorString(code), file,
-            line);
-    if (abort)
-      exit(code);
-  }
-}
-
 // ----------------------------------------------------------------------------
 // I/O functions
 // ----------------------------------------------------------------------------
@@ -116,7 +100,7 @@ double* addLayer2D(int rows, int columns)
 {
   double *tmp;
   
-  DeviceErrorhdl(cudaMallocManaged(&tmp, sizeof(double) * rows * columns));
+  cudaMallocManaged(&tmp, sizeof(double) * rows * columns);
   if (!tmp)
     return NULL;
   return tmp;
@@ -283,16 +267,15 @@ int main(int argc, char **argv)
   int *Xi;
   int *Xj;
 
-  DeviceErrorhdl(cudaMallocManaged(&Xi, sizeof(int) * 5));
-  DeviceErrorhdl(cudaMallocManaged(&Xj, sizeof(int) * 5));
+  cudaMallocManaged(&Xi, sizeof(int) * 5);
+  cudaMallocManaged(&Xj, sizeof(int) * 5);
 
-  // Xj: von Neuman neighborhood row coordinates (see below)
   Xi[0] = 0;
   Xi[1] = -1;
   Xi[2] = 0;
   Xi[3] = 0;
   Xi[4] = 1;
-  // Xj: von Neuman neighborhood col coordinates (see below)
+  
   Xj[0] = 0;
   Xj[1] = 0;
   Xj[2] = -1;
@@ -313,24 +296,9 @@ int main(int argc, char **argv)
   dim3 comp_block_size(comp_dim_y, comp_dim_x, 1);
   dim3 comp_grid_size(ceil(rows / comp_dim_y), ceil(cols / comp_dim_x), 1);
 
-  // The adopted von Neuman neighborhood
-  // Format: flow_index:cell_label:(row_index,col_index)
-  //
-  //   cell_label in [0,1,2,3,4]: label assigned to each cell in the
-  //   neighborhood flow_index in   [0,1,2,3]: outgoing flow indices in Sf from
-  //   cell 0 to the others
-  //       (row_index,col_index): 2D relative indices of the cells
-  //
-  //               |0:1:(-1, 0)|
-  //   |1:2:( 0,-1)| :0:( 0, 0)|2:3:( 0, 1)|
-  //               |3:4:( 1, 0)|
-  //
-  //
-
   Sz = addLayer2D(r, c); // Allocates the Sz substate grid
   Sh = addLayer2D(r, c); // Allocates the Sh substate grid
-  Sf = addLayer2D(ADJACENT_CELLS * r,
-                  c); // Allocates the Sf substates grid,
+  Sf = addLayer2D(ADJACENT_CELLS * r, c); // Allocates the Sf substates grid,
                       //   having one layer for each adjacent cell
 
   loadGrid2D(Sz, r, c, argv[DEM_PATH_ID]);    // Load Sz from file
@@ -339,27 +307,16 @@ int main(int argc, char **argv)
   // Apply the init kernel (elementary process) to the whole domain grid
   // (cellular space)
   sciddicaTSimulationInitKernel<<<grid_size, block_size>>>(r, c, Sz, Sh);
-  DeviceErrorhdl(cudaPeekAtLastError());
-  DeviceErrorhdl(cudaDeviceSynchronize());
 
   util::Timer cl_timer;
-  // simulation loop
+  // simulation loop with kernel applications
   for (int s = 0; s < steps; ++s)
   {
-    // Apply the resetFlow kernel to the whole domain
     sciddicaTResetFlowsKernel<<<grid_size, block_size>>>(r, c, nodata, Sf);
-    DeviceErrorhdl(cudaPeekAtLastError());
-    DeviceErrorhdl(cudaDeviceSynchronize());
-    // Apply the FlowComputation kernel to the whole domain
-    sciddicaTFlowsComputationKernel<<<comp_grid_size, comp_block_size>>>(
-        r, c, nodata, Xi, Xj, Sz, Sh, Sf, p_r, p_epsilon);
-    DeviceErrorhdl(cudaPeekAtLastError());
-    DeviceErrorhdl(cudaDeviceSynchronize());
-    // Apply the WidthUpdate mass balance kernel to the whole domain
-    sciddicaTWidthUpdateKernel<<<grid_size, block_size>>>(r, c, nodata, Xi, Xj,
-                                                          Sz, Sh, Sf);
-    DeviceErrorhdl(cudaPeekAtLastError());
-    DeviceErrorhdl(cudaDeviceSynchronize());
+
+    sciddicaTFlowsComputationKernel<<<comp_grid_size, comp_block_size>>>(r, c, nodata, Xi, Xj, Sz, Sh, Sf, p_r, p_epsilon);
+
+    sciddicaTWidthUpdateKernel<<<grid_size, block_size>>>(r, c, nodata, Xi, Xj, Sz, Sh, Sf);
   }
   double cl_time = static_cast<double>(cl_timer.getTimeMilliseconds()) / 1000.0;
   printf("Elapsed time: %lf [s]\n", cl_time);
@@ -367,9 +324,9 @@ int main(int argc, char **argv)
   saveGrid2Dr(Sh, r, c, argv[OUTPUT_PATH_ID]); // Save Sh to file
 
   printf("Releasing memory...\n");
-  DeviceErrorhdl(cudaFree(Sz));
-  DeviceErrorhdl(cudaFree(Sh));
-  DeviceErrorhdl(cudaFree(Sf));
+  cudaFree(Sz);
+  cudaFree(Sh);
+  cudaFree(Sf);
 
   return 0;
 }

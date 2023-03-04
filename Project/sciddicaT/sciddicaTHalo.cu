@@ -28,18 +28,20 @@
 #define BUF_GET(M, rows, columns, n, i, j)                                     \
   (M[(((n) * (rows) * (columns)) + ((i) * (columns)) + (j))])
 
-//
+// Halo cells parameters
 #define MASK_WIDTH 3
-#define TILE_WIDTH 14 // 32 - MASKWIDTH + 1
+#define TILE_WIDTH 14
 #define TILE_BLOCK 16
 
 // ----------------------------------------------------------------------------
 // I/O functions and memory management
 // ----------------------------------------------------------------------------
-void readHeaderInfo(char *path, int &nrows, int &ncols, double &nodata) {
+void readHeaderInfo(char *path, int &nrows, int &ncols, double &nodata) 
+{
   FILE *f;
 
-  if ((f = fopen(path, "r")) == 0) {
+  if ((f = fopen(path, "r")) == 0) 
+  {
     printf("%s configuration header file not found\n", path);
     exit(0);
   }
@@ -63,17 +65,20 @@ void readHeaderInfo(char *path, int &nrows, int &ncols, double &nodata) {
   nodata = atof(str); // NODATA_value
 }
 
-bool loadGrid2D(double *M, int rows, int columns, char *path) {
+bool loadGrid2D(double *M, int rows, int columns, char *path) 
+{
   FILE *f = fopen(path, "r");
 
-  if (!f) {
+  if (!f) 
+  {
     printf("%s grid file not found\n", path);
     exit(0);
   }
 
   char str[STRLEN];
   for (int i = 0; i < rows; ++i)
-    for (int j = 0; j < columns; ++j) {
+    for (int j = 0; j < columns; ++j) 
+    {
       fscanf(f, "%s", str);
       SET(M, columns, i, j, atof(str));
     }
@@ -83,7 +88,8 @@ bool loadGrid2D(double *M, int rows, int columns, char *path) {
   return true;
 }
 
-bool saveGrid2Dr(double *M, int rows, int columns, char *path) {
+bool saveGrid2Dr(double *M, int rows, int columns, char *path) 
+{
   FILE *f;
   f = fopen(path, "w");
 
@@ -91,8 +97,10 @@ bool saveGrid2Dr(double *M, int rows, int columns, char *path) {
     return false;
 
   char str[STRLEN];
-  for (int i = 0; i < rows; ++i) {
-    for (int j = 0; j < columns; ++j) {
+  for (int i = 0; i < rows; ++i) 
+  {
+    for (int j = 0; j < columns; ++j) 
+    {
       sprintf(str, "%f ", GET(M, columns, i, j));
       fprintf(f, "%s ", str);
     }
@@ -106,6 +114,7 @@ bool saveGrid2Dr(double *M, int rows, int columns, char *path) {
 
 double *addLayer2D(int rows, int columns) {
   double *tmp;
+
   cudaMallocManaged(&tmp, sizeof(double) * rows * columns);
 
   if (!tmp)
@@ -122,7 +131,8 @@ __global__ void sciddicaTSimulationInit(int r, int c, double *Sz, double *Sh) {
   double z, h;
   h = GET(Sh, c, i, j);
 
-  if (h > 0.0) {
+  if (h > 0.0) 
+  {
     z = GET(Sz, c, i, j);
     SET(Sz, c, i, j, z - h);
   }
@@ -160,21 +170,23 @@ __global__ void sciddicaTFlowsComputation(int r, int c, double nodata, int *Xi, 
   unsigned int col_halo = col_index - MASK_WIDTH / 2;
   unsigned int row_halo = row_index - MASK_WIDTH / 2;
 
-  if ((row_halo > 0) && (row_halo < r) && (col_halo > 0) && (col_halo < c)) {
+  if ((row_halo >= 0) && (row_halo < r) && (col_halo >= 0) && (col_halo < c)) 
+  {
     Sz_ds[threadIdx.y][threadIdx.x] = GET(Sz, c, row_halo, col_halo);
     Sh_ds[threadIdx.y][threadIdx.x] = GET(Sh, c, row_halo, col_halo);
-  } else {
+  } else 
+  {
     Sz_ds[threadIdx.y][threadIdx.x] = 0.0;
     Sh_ds[threadIdx.y][threadIdx.x] = 0.0;
   }
   __syncthreads();
 
-  if (row_index >= 1 && row_index < r - 1 && col_index >= 1 &&
-      col_index < c - 1) {
+  if (row_index >= 1 && row_index < r - 1 && col_index >= 1 && col_index < c - 1) 
+  {
     int index_i = threadIdx.y + MASK_WIDTH / 2;
     int index_j = threadIdx.x + MASK_WIDTH / 2;
-    if (index_i >= 1 && index_i <= TILE_WIDTH && index_j >= 1 &&
-        index_j <= TILE_WIDTH) {
+    if (index_i >= 1 && index_i <= TILE_WIDTH && index_j >= 1 && index_j <= TILE_WIDTH) 
+    {
       m = Sh_ds[index_i][index_j] - p_epsilon;
       u[0] = Sz_ds[index_i][index_j] + p_epsilon;
 
@@ -200,33 +212,41 @@ __global__ void sciddicaTFlowsComputation(int r, int c, double nodata, int *Xi, 
         cells_count = 0;
 
         for (n = 0; n < 5; n++)
-          if (!eliminated_cells[n]) {
+          if (!eliminated_cells[n]) 
+          {
             average += u[n];
             cells_count++;
           }
 
-        if (cells_count != 0) {
+        if (cells_count != 0) 
+        {
           average /= cells_count;
         }
 
-        for (n = 0; n < 5; n++) {
-          if ((average <= u[n]) && (!eliminated_cells[n])) {
+        for (n = 0; n < 5; n++) 
+        {
+          if ((average <= u[n]) && (!eliminated_cells[n])) 
+          {
             eliminated_cells[n] = true;
             again = true;
           }
         }
       } while (again);
 
-      if (!eliminated_cells[1]) {
+      if (!eliminated_cells[1]) 
+      {
         BUF_SET(Sf, r, c, 0, row_index, col_index, (average - u[1]) * p_r);
       }
-      if (!eliminated_cells[2]) {
+      if (!eliminated_cells[2]) 
+      {
         BUF_SET(Sf, r, c, 1, row_index, col_index, (average - u[2]) * p_r);
       }
-      if (!eliminated_cells[3]) {
+      if (!eliminated_cells[3]) 
+      {
         BUF_SET(Sf, r, c, 2, row_index, col_index, (average - u[3]) * p_r);
       }
-      if (!eliminated_cells[4]) {
+      if (!eliminated_cells[4]) 
+      {
         BUF_SET(Sf, r, c, 3, row_index, col_index, (average - u[4]) * p_r);
       }
     }
@@ -234,9 +254,8 @@ __global__ void sciddicaTFlowsComputation(int r, int c, double nodata, int *Xi, 
 }
 
 // This kernel benefits from a tiled implementation
-__global__ void sciddicaTWidthUpdate(int r, int c, double nodata, int *Xi, int *Xj,
-                                               double *Sz, double *Sh,
-                                               double *Sf) {
+__global__ void sciddicaTWidthUpdate(int r, int c, double nodata, int *Xi, int *Xj, double *Sz, double *Sh, double *Sf) 
+{
   int row_index = threadIdx.y + TILE_WIDTH * blockIdx.y;
   int col_index = threadIdx.x + TILE_WIDTH * blockIdx.x;
   long row_halo = row_index - MASK_WIDTH / 2;
@@ -246,34 +265,29 @@ __global__ void sciddicaTWidthUpdate(int r, int c, double nodata, int *Xi, int *
 
   __shared__ double Sf_ds[TILE_BLOCK * ADJACENT_CELLS][TILE_BLOCK];
 
-  if ((col_halo >= 0) && (col_halo < c) && (row_halo >= 0) && (row_halo < r)) {
+  if ((col_halo >= 0) && (col_halo < c) && (row_halo >= 0) && (row_halo < r)) 
+  {
     Sf_ds[threadIdx.y][threadIdx.x] = BUF_GET(Sf, r, c, 0, row_halo, col_halo);
-    Sf_ds[threadIdx.y + TILE_BLOCK][threadIdx.x] =
-        BUF_GET(Sf, r, c, 1, row_halo, col_halo);
-    Sf_ds[threadIdx.y + 2 * TILE_BLOCK][threadIdx.x] =
-        BUF_GET(Sf, r, c, 2, row_halo, col_halo);
-    Sf_ds[threadIdx.y + 3 * TILE_BLOCK][threadIdx.x] =
-        BUF_GET(Sf, r, c, 3, row_halo, col_halo);
-  } else {
+    Sf_ds[threadIdx.y + TILE_BLOCK][threadIdx.x] = BUF_GET(Sf, r, c, 1, row_halo, col_halo);
+    Sf_ds[threadIdx.y + 2 * TILE_BLOCK][threadIdx.x] = BUF_GET(Sf, r, c, 2, row_halo, col_halo);
+    Sf_ds[threadIdx.y + 3 * TILE_BLOCK][threadIdx.x] = BUF_GET(Sf, r, c, 3, row_halo, col_halo);
+  } else 
+  {
     Sf_ds[threadIdx.y][threadIdx.x] = 0.0;
   }
   __syncthreads();
 
-  if (row_index >= 1 && col_index >= 1 && row_index < r - 1 &&
-      col_index < c - 1) {
+  if (row_index >= 1 && col_index >= 1 && row_index < r - 1 && col_index < c - 1) 
+  {
     int index_i = threadIdx.y + MASK_WIDTH / 2;
     int index_j = threadIdx.x + MASK_WIDTH / 2;
-    if (index_i >= 1 && index_i <= TILE_WIDTH && index_j >= 1 &&
-        index_j <= TILE_WIDTH) {
+    if (index_i >= 1 && index_i <= TILE_WIDTH && index_j >= 1 && index_j <= TILE_WIDTH) 
+    {
       h_next = GET(Sh, c, row_index, col_index);
-      h_next += Sf_ds[index_i + Xi[1] + (TILE_BLOCK * 3)][index_j + Xj[1]] -
-                Sf_ds[index_i][index_j];
-      h_next += Sf_ds[index_i + Xi[2] + (TILE_BLOCK * 2)][index_j + Xj[2]] -
-                Sf_ds[index_i + TILE_BLOCK][index_j];
-      h_next += Sf_ds[index_i + Xi[3] + TILE_BLOCK][index_j + Xj[3]] -
-                Sf_ds[index_i + (TILE_BLOCK * 2)][index_j];
-      h_next += Sf_ds[index_i + Xi[4]][index_j + Xj[4]] -
-                Sf_ds[index_i + (TILE_BLOCK * 3)][index_j];
+      h_next += Sf_ds[index_i + Xi[1] + (TILE_BLOCK * 3)][index_j + Xj[1]] - Sf_ds[index_i][index_j];
+      h_next += Sf_ds[index_i + Xi[2] + (TILE_BLOCK * 2)][index_j + Xj[2]] - Sf_ds[index_i + TILE_BLOCK][index_j];
+      h_next += Sf_ds[index_i + Xi[3] + TILE_BLOCK][index_j + Xj[3]] - Sf_ds[index_i + (TILE_BLOCK * 2)][index_j];
+      h_next += Sf_ds[index_i + Xi[4]][index_j + Xj[4]] - Sf_ds[index_i + (TILE_BLOCK * 3)][index_j];
 
       SET(Sh, c, row_index, col_index, h_next);
     }
@@ -300,8 +314,7 @@ int main(int argc, char **argv) {
 
   Sz = addLayer2D(r, c); // Allocates the Sz substate grid
   Sh = addLayer2D(r, c); // Allocates the Sh substate grid
-  Sf = addLayer2D(ADJACENT_CELLS * r,
-                  c); // Allocates the Sf substates grid, having one layer for
+  Sf = addLayer2D(ADJACENT_CELLS * r, c); // Allocates the Sf substates grid, having one layer for
                       // each adjacent cell
   cudaMallocManaged(&Xi, sizeof(int) * 5);
   Xi[0] = 0;
@@ -326,30 +339,36 @@ int main(int argc, char **argv) {
   dim3 t_grid_size(ceil(rows / TILE_WIDTH), ceil(cols / TILE_WIDTH), 1);
   printf(">>>>Block size %d, Grid size: %d x %d\n",TILE_WIDTH, t_grid_size.x, t_grid_size.y);
   
+  //setting up the grid and block sizes
   int THREADS_N = TILE_BLOCK;
   dim3 block_size(THREADS_N, THREADS_N, 1);
-  dim3 grid_size(ceil(sqrt(n / (THREADS_N * THREADS_N))),
-                 ceil(sqrt(n / (THREADS_N * THREADS_N))), 1);
+  dim3 grid_size(ceil(sqrt(n / (THREADS_N * THREADS_N))), ceil(sqrt(n / (THREADS_N * THREADS_N))), 1);
   printf(">>>>Block size %d, Grid size: %d x %d\n",THREADS_N, grid_size.x, grid_size.y);
+
+  //initializing simulation
   sciddicaTSimulationInit<<<grid_size, block_size>>>(r, c, Sz, Sh);
+
   cudaDeviceSynchronize();
   util::Timer cl_timer;
+
+  //main loop with kernel calls for each step
   for (int s = 0; s < steps; ++s) {
     sciddicaTResetFlows<<<grid_size, block_size>>>(r, c, Sf);
     cudaDeviceSynchronize();
-    sciddicaTFlowsComputation<<<t_grid_size, t_block_size>>>(
-        r, c, nodata, Xi, Xj, Sz, Sh, Sf, p_r, p_epsilon);
+    
+    sciddicaTFlowsComputation<<<t_grid_size, t_block_size>>>(r, c, nodata, Xi, Xj, Sz, Sh, Sf, p_r, p_epsilon);
     cudaDeviceSynchronize();
-    sciddicaTWidthUpdate<<<t_grid_size, t_block_size>>>(r, c, nodata, Xi, Xj, Sz,
-                                                    Sh, Sf);
+
+    sciddicaTWidthUpdate<<<t_grid_size, t_block_size>>>(r, c, nodata, Xi, Xj, Sz,Sh, Sf);
     cudaDeviceSynchronize();
   }
+
   double cl_time = static_cast<double>(cl_timer.getTimeMilliseconds()) / 1000.0;
   printf("Elapsed time: %lf [s]\n", cl_time);
 
   saveGrid2Dr(Sh, r, c, argv[OUTPUT_PATH_ID]);
 
-  // printf("Releasing memory...\n");
+  printf("Releasing memory...\n");
 
   cudaFree(Sz);
   cudaFree(Sh);
