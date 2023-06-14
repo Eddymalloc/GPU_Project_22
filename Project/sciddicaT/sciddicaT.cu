@@ -267,6 +267,7 @@ int main(int argc, char **argv)
   int *Xi;
   int *Xj;
 
+  //managed - shared memory
   cudaMallocManaged(&Xi, sizeof(int) * 5);
   cudaMallocManaged(&Xj, sizeof(int) * 5);
 
@@ -308,17 +309,24 @@ int main(int argc, char **argv)
   // (cellular space)
   sciddicaTSimulationInitKernel<<<grid_size, block_size>>>(r, c, Sz, Sh);
 
+  //c++ timer for exec
   util::Timer cl_timer;
-  // simulation loop with kernel applications
+
+  // simulation loop with kernel applications and synch threads becauses of shared memory
   for (int s = 0; s < steps; ++s)
   {
     sciddicaTResetFlowsKernel<<<grid_size, block_size>>>(r, c, nodata, Sf);
+    //cudaDeviceSynchronize();
 
     sciddicaTFlowsComputationKernel<<<comp_grid_size, comp_block_size>>>(r, c, nodata, Xi, Xj, Sz, Sh, Sf, p_r, p_epsilon);
+    //cudaDeviceSynchronize();
 
     sciddicaTWidthUpdateKernel<<<grid_size, block_size>>>(r, c, nodata, Xi, Xj, Sz, Sh, Sf);
+    //cudaDeviceSynchronize();
   }
+  cudaDeviceSynchronize();
   double cl_time = static_cast<double>(cl_timer.getTimeMilliseconds()) / 1000.0;
+  
   printf("Elapsed time: %lf [s]\n", cl_time);
 
   saveGrid2Dr(Sh, r, c, argv[OUTPUT_PATH_ID]); // Save Sh to file
